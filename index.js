@@ -18,6 +18,7 @@ const mailjet = Mailjet.apiConnect(MAILJET_API_KEY, MAILJET_SECRET_KEY);
 const CAMPAIGNS = [
     { name: "WinterSupercycle", url: "https://zealy.io/cw/wintersupercycle/questboard/sprints" },
     { name: "EndlessProtocol", url: "https://zealy.io/cw/endlessprotocol/questboard/sprints" },
+    { name: "Nobullies", url: "https://zealy.io/cw/nobullies/questboard/sprints" },
     { name: "DarkExGlobal", url: "https://zealy.io/cw/darkexglobal/questboard/sprints" }
 ];
 
