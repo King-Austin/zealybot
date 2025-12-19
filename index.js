@@ -9,7 +9,7 @@ const BROWSERLESS_TOKEN = "2TU8b5vOv6e7eyqefe2d0ce98de5c5038fda2bf31f85075fd";
 
 const SENDER_EMAIL = "nworahebuka.a@gmail.com"; 
 const RECIPIENTS = [
-    { Email: "nworahebuka@gmail.com" }
+    { Email: "nworahebuka360@gmail.com" }
 ];
 
 const mailjet = Mailjet.apiConnect(MAILJET_API_KEY, MAILJET_SECRET_KEY);
