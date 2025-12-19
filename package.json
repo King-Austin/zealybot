@@ -1,16 +1,15 @@
 {
-  "name": "zealybot",
+  "name": "zealy-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Hardcore Zealy Scraper",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "puppeteer-core": "^24.33.1",
-    "resend": "^6.6.0"
-  }
+    "node-mailjet": "^6.0.5",
+    "puppeteer-core": "^23.0.0"
+  },
+  "author": "",
+  "license": "ISC"
 }
