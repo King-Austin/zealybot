@@ -19,7 +19,8 @@ const CAMPAIGNS = [
     { name: "WinterSupercycle", url: "https://zealy.io/cw/wintersupercycle/questboard/sprints" },
     { name: "EndlessProtocol", url: "https://zealy.io/cw/endlessprotocol/questboard/sprints" },
     { name: "Nobullies", url: "https://zealy.io/cw/nobullies/questboard/sprints" },
-    { name: "DarkExGlobal", url: "https://zealy.io/cw/darkexglobal/questboard/sprints" }
+    { name: "DarkExGlobal", url: "https://zealy.io/cw/darkexglobal/questboard/sprints" },
+    { name: "Inference", url: "https://zealy.io/cw/inference/questboard/sprints" }
 ];
 
 async function run() {
