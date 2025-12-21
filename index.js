@@ -1,7 +1,11 @@
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { Resend } = require('resend');
 const { createClient } = require('@supabase/supabase-js');
+const pLimit = require('p-limit'); 
 require('dotenv').config();
+
+puppeteer.use(StealthPlugin());
 
 const {
     RESEND_API_KEY,
@@ -13,10 +17,8 @@ const {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const resend = new Resend(RESEND_API_KEY);
+const limit = pLimit(3); // Process 3 campaigns at a time
 
-/**
- * Helper: Scrolls to the bottom of the page to trigger lazy-loading
- */
 async function autoScroll(page) {
     await page.evaluate(async () => {
         await new Promise((resolve) => {
@@ -36,62 +38,71 @@ async function autoScroll(page) {
 }
 
 async function scrapeProject(browser, project) {
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    try {
-        console.log(`🔍 Checking: ${project.name}`);
-        await page.goto(project.url, { waitUntil: 'networkidle2', timeout: 60000 });
-        
-        // Wait for the first quest card to appear
-        await page.waitForSelector('.quest-card-quest-name', { timeout: 20000 });
-
-        // Scroll to load all lazy-loaded quests
-        await autoScroll(page);
-        // Small buffer for DOM to settle after scroll
-        await new Promise(r => setTimeout(r, 2000)); 
-
-        const currentTasks = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll('.quest-card-quest-name'))
-                        .map(e => e.innerText.trim());
+    return limit(async () => {
+        const page = await browser.newPage();
+        // Optimize: Block images to save credits and speed up
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
         });
 
-        // Fetch old data from Supabase
-        const { data } = await supabase.from('quest_snapshots').select('task_list').eq('campaign_name', project.name).single();
-        const oldTasks = data ? data.task_list : [];
-        const newOnes = currentTasks.filter(t => !oldTasks.includes(t));
+        try {
+            console.log(`🔍 Checking: ${project.name}`);
+            await page.goto(project.url, { waitUntil: 'networkidle2', timeout: 60000 });
+            
+            // Check if page has quests
+            const selector = '.quest-card-quest-name';
+            const exists = await page.$(selector);
 
-        if (newOnes.length > 0) {
-            console.log(`✨ Found ${newOnes.length} NEW quests for ${project.name}`);
-            // Update Supabase immediately
+            if (!exists) {
+                return { name: project.name, status: 'No Quests Found', tasks: [], url: project.url, new: [] };
+            }
+
+            await autoScroll(page);
+            await new Promise(r => setTimeout(r, 2000)); 
+
+            const currentTasks = await page.evaluate(() => {
+                return Array.from(document.querySelectorAll('.quest-card-quest-name'))
+                            .map(e => e.innerText.trim());
+            });
+
+            const { data } = await supabase.from('quest_snapshots').select('task_list').eq('campaign_name', project.name).single();
+            const oldTasks = data ? data.task_list : [];
+            const newOnes = currentTasks.filter(t => !oldTasks.includes(t));
+
+            // Sync with Supabase
             await supabase.from('quest_snapshots').upsert({ 
                 campaign_name: project.name, 
                 task_list: currentTasks, 
                 updated_at: new Date() 
             }, { onConflict: 'campaign_name' });
 
-            return { name: project.name, tasks: newOnes, url: project.url };
+            return { 
+                name: project.name, 
+                status: 'Active', 
+                tasks: currentTasks, 
+                new: newOnes, 
+                url: project.url 
+            };
+        } catch (e) {
+            console.error(`⚠️ Error ${project.name}:`, e.message);
+            return { name: project.name, status: 'Error/Timeout', tasks: [], new: [], url: project.url };
+        } finally {
+            await page.close();
         }
-        return null;
-    } catch (e) {
-        console.error(`⚠️ Error scraping ${project.name}:`, e.message);
-        return null;
-    } finally {
-        await page.close();
-    }
+    });
 }
 
 async function run() {
-    console.log("🚀 Starting Parallel Scrape...");
+    const startTime = new Date().toLocaleString();
+    console.log(`🚀 Run started at ${startTime}`);
 
     const { data: CAMPAIGNS } = await supabase.from('campaigns').select('name, url').eq('active', true);
     const { data: recipientsData } = await supabase.from('recipients').select('email').eq('active', true);
     const RECIPIENTS = recipientsData?.map(r => r.email) || [];
 
-    if (!CAMPAIGNS?.length || !RECIPIENTS.length) {
-        console.log("❌ Setup incomplete. Check Supabase tables.");
-        return;
-    }
+    if (!CAMPAIGNS?.length || !RECIPIENTS.length) return;
 
     let browser;
     try {
@@ -99,40 +110,56 @@ async function run() {
             browserWSEndpoint: `wss://chrome.browserless.io?token=${BROWSERLESS_TOKEN}`
         });
     } catch (err) {
-        console.error("❌ Browserless connection failed:", err.message);
+        console.error("❌ Connection failed", err);
         return;
     }
 
-    // RUN IN PARALLEL
-    // This maps every campaign to a promise and runs them all at once
-    const results = await Promise.all(CAMPAIGNS.map(project => scrapeProject(browser, project)));
-    const updatesFound = results.filter(r => r !== null);
-
+    const results = await Promise.all(CAMPAIGNS.map(p => scrapeProject(browser, p)));
     await browser.close();
 
-    if (updatesFound.length > 0) {
-        console.log("✉️ Sending Email...");
-        const emailHtml = updatesFound.map(p => `
-            <div style="font-family: sans-serif; border: 2px solid #602fd6; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-                <h2 style="color: #602fd6; margin-top: 0;">${p.name}</h2>
-                <ul>${p.tasks.map(t => `<li style="margin-bottom:8px;"><strong>${t}</strong></li>`).join('')}</ul>
-                <a href="${p.url}" style="display: inline-block; padding: 10px 20px; background-color: #602fd6; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">Go to Sprint</a>
-            </div>
-        `).join('');
+    const anyNewUpdates = results.some(r => r.new.length > 0);
+    const subject = anyNewUpdates 
+        ? `🚨 NEW Quests Detected! (${results.filter(r => r.new.length > 0).map(r => r.name).join(', ')})`
+        : `✅ Zealy Status: No New Quests Found`;
 
-        try {
-            await resend.emails.send({
-                from: `ZealyBot <${SENDER_EMAIL}>`,
-                to: RECIPIENTS,
-                subject: `🚨 NEW Quests: ${updatesFound.map(u => u.name).join(', ')}`,
-                html: emailHtml,
-            });
-            console.log("📬 Notifications sent!");
-        } catch (err) {
-            console.error("❌ Resend Error:", err);
-        }
-    } else {
-        console.log("✅ No new quests found.");
+    // Build the Email Content
+    const emailHtml = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
+            <h1 style="color: #602fd6; text-align: center;">ZealyBot Report</h1>
+            <p style="text-align: center; color: #666;">Run completed at: ${startTime}</p>
+            <hr style="border: 0; border-top: 1px solid #eee;" />
+            
+            ${results.map(p => `
+                <div style="margin-bottom: 30px; padding: 15px; border-radius: 8px; background-color: ${p.new.length > 0 ? '#fdf2ff' : '#f9f9f9'}; border-left: 5px solid ${p.new.length > 0 ? '#602fd6' : '#ccc'};">
+                    <h3 style="margin-top: 0; color: #333;">${p.name} <small style="font-weight: normal; font-size: 12px; color: #666;">(${p.status})</small></h3>
+                    
+                    ${p.new.length > 0 ? `
+                        <p style="color: #602fd6; font-weight: bold;">✨ ${p.new.length} New Tasks:</p>
+                        <ul style="padding-left: 20px;">
+                            ${p.new.map(t => `<li style="margin-bottom: 5px;"><strong>${t}</strong></li>`).join('')}
+                        </ul>
+                    ` : `<p style="color: #888; font-style: italic;">No new tasks detected.</p>`}
+                    
+                    <a href="${p.url}" style="font-size: 13px; color: #602fd6;">Visit Zealy Page &rarr;</a>
+                </div>
+            `).join('')}
+
+            <div style="text-align: center; font-size: 11px; color: #aaa; margin-top: 20px;">
+                Automated notification from your Supabase Zealy Scraper.
+            </div>
+        </div>
+    `;
+
+    try {
+        await resend.emails.send({
+            from: `ZealyBot <${SENDER_EMAIL}>`,
+            to: RECIPIENTS,
+            subject: subject,
+            html: emailHtml,
+        });
+        console.log("📬 Email Sent Successfully!");
+    } catch (err) {
+        console.error("❌ Email failed", err);
     }
 }
 
