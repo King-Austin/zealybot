@@ -1,16 +1,19 @@
 {
   "name": "zealy-bot",
   "version": "1.0.0",
-  "description": "Hardcore Zealy Scraper",
+  "description": "Hardcore Zealy Scraper with Cloud Sync and Stealth",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.89.0",
-    "dotenv": "^17.2.3",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1",
+    "p-limit": "^3.1.0",
     "puppeteer-core": "^23.0.0",
-    "resend": "^6.6.0"
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "resend": "^3.1.0"
   },
   "author": "",
   "license": "ISC"
