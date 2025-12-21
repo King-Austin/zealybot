@@ -1,24 +1,23 @@
 name: ZealyHardcore
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *' # Offset to avoid GitHub's traffic jams
   workflow_dispatch:
+
 jobs:
   run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
-      - run: node index.js
-      - name: Save State
-        run: |
-          git config --global user.name "Bot"
-          git config --global user.email "bot@bot.com"
-          git add database.json
-          git commit -m "update [skip ci]" || echo "no changes"
-          git push
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+     
+      - name: Run Scraper
+        run: node index.js
