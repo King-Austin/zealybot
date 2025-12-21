@@ -1,7 +1,7 @@
 {
   "name": "zealy-bot",
   "version": "1.0.0",
-  "description": "Hardcore Zealy Scraper with Cloud Sync and Stealth",
+  "description": "Hardcore Zealy Scraper with Telegram Notifications",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,12 +9,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "dotenv": "^16.3.1",
+    "node-telegram-bot-api": "^0.66.0",
     "p-limit": "^3.1.0",
     "puppeteer-core": "^23.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "resend": "^3.1.0"
-  },
-  "author": "",
-  "license": "ISC"
+  }
 }
