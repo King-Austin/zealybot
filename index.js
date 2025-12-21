@@ -1,31 +1,81 @@
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
-const Mailjet = require('node-mailjet');
+const { Resend } = require('resend');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
-// --- HARDCODED SECRETS ---
-const MAILJET_API_KEY = "176bbc4210cfc063e5cd785de67a7818";
-const MAILJET_SECRET_KEY = "6722b4a24a9bc14726619d5f708ec958";
-const BROWSERLESS_TOKEN = "2TU8b5vOv6e7eyqefe2d0ce98de5c5038fda2bf31f85075fd";
+// Load environment variables
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN;
+const SENDER_EMAIL = process.env.SENDER_EMAIL;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-const SENDER_EMAIL = "nworahebuka.a@gmail.com"; 
-const RECIPIENTS = [
-    { Email: "nworahebuka360@gmail.com" }
-];
+// Initialize Supabase client
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const mailjet = Mailjet.apiConnect(MAILJET_API_KEY, MAILJET_SECRET_KEY);
+// Initialize Resend
+const resend = new Resend(RESEND_API_KEY);
 
-// UPDATED CAMPAIGNS
-const CAMPAIGNS = [
-    { name: "WinterSupercycle", url: "https://zealy.io/cw/wintersupercycle/questboard/sprints" },
-    { name: "EndlessProtocol", url: "https://zealy.io/cw/endlessprotocol/questboard/sprints" },
-    { name: "Nobullies", url: "https://zealy.io/cw/nobullies/questboard/sprints" },
-    { name: "DarkExGlobal", url: "https://zealy.io/cw/darkexglobal/questboard/sprints" },
-    { name: "Inference", url: "https://zealy.io/cw/inference/questboard/sprints" }
-];
+// Function to fetch campaigns from Supabase
+async function fetchCampaigns() {
+    try {
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select('name, url')
+            .eq('active', true);
+
+        if (error) {
+            console.error('Error fetching campaigns:', error);
+            return [];
+        }
+
+        return data || [];
+    } catch (err) {
+        console.error('Failed to fetch campaigns:', err);
+        return [];
+    }
+}
+
+// Function to fetch email recipients from Supabase
+async function fetchRecipients() {
+    try {
+        const { data, error } = await supabase
+            .from('recipients')
+            .select('email')
+            .eq('active', true);
+
+        if (error) {
+            console.error('Error fetching recipients:', error);
+            return [];
+        }
+
+        return data.map(recipient => ({ Email: recipient.email })) || [];
+    } catch (err) {
+        console.error('Failed to fetch recipients:', err);
+        return [];
+    }
+}
 
 async function run() {
     console.log("🚀 Starting Scrape for Endless & DarkEx...");
-    
+
+    // Fetch campaigns and recipients from Supabase
+    const CAMPAIGNS = await fetchCampaigns();
+    const RECIPIENTS = await fetchRecipients();
+
+    if (CAMPAIGNS.length === 0) {
+        console.error("❌ No campaigns found in database");
+        return;
+    }
+
+    if (RECIPIENTS.length === 0) {
+        console.error("❌ No recipients found in database");
+        return;
+    }
+
+    console.log(`📊 Loaded ${CAMPAIGNS.length} campaigns and ${RECIPIENTS.length} recipients`);
+
     let browser;
     try {
         browser = await puppeteer.connect({
@@ -34,7 +84,7 @@ async function run() {
         console.log("✅ Connected to Browserless");
     } catch (err) {
         console.error("❌ Connection failed:", err.message);
-        return; 
+        return;
     }
 
     let db = {};
@@ -81,29 +131,31 @@ async function run() {
     await browser.close();
 
     if (updatesFound.length > 0) {
-        console.log("✉️ Sending Mailjet Email...");
+        console.log("✉️ Sending Email via Resend...");
         try {
-            await mailjet
-                .post("send", { version: 'v3.1' })
-                .request({
-                    Messages: [{
-                        From: { Email: SENDER_EMAIL, Name: "ZealyBot" },
-                        To: RECIPIENTS,
-                        Subject: `🚨 NEW Quests: ${updatesFound.map(u => u.name).join(', ')}`,
-                        HTMLPart: updatesFound.map(p => `
-                            <div style="font-family: sans-serif; border: 1px solid #602fd6; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                                <h2 style="color: #602fd6;">${p.name}</h2>
-                                <ul>${p.tasks.map(t => `<li><strong>${t}</strong></li>`).join('')}</ul>
-                                <p><a href="https://zealy.io/cw/${p.name.toLowerCase()}">Go to Sprint</a></p>
-                            </div>
-                        `).join('')
-                    }]
-                });
-            
-            fs.writeFileSync('database.json', JSON.stringify(db, null, 2), 'utf8');
-            console.log("📬 Email Sent Successfully!");
+            const emailHtml = updatesFound.map(p => `
+                <div style="font-family: sans-serif; border: 1px solid #602fd6; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                    <h2 style="color: #602fd6;">${p.name}</h2>
+                    <ul>${p.tasks.map(t => `<li><strong>${t}</strong></li>`).join('')}</ul>
+                    <p><a href="https://zealy.io/cw/${p.name.toLowerCase()}">Go to Sprint</a></p>
+                </div>
+            `).join('');
+
+            const { data, error } = await resend.emails.send({
+                from: `ZealyBot <${SENDER_EMAIL}>`,
+                to: RECIPIENTS.map(r => r.Email), // Convert to array of email strings
+                subject: `🚨 NEW Quests: ${updatesFound.map(u => u.name).join(', ')}`,
+                html: emailHtml,
+            });
+
+            if (error) {
+                console.error("❌ Resend Error:", error);
+            } else {
+                console.log("📬 Email Sent Successfully!", data);
+                fs.writeFileSync('database.json', JSON.stringify(db, null, 2), 'utf8');
+            }
         } catch (err) {
-            console.error("❌ Mailjet Error:", err.statusCode);
+            console.error("❌ Email sending failed:", err);
         }
     } else {
         console.log("✅ No new quests found.");
