@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1.js"
+    }
+  ],
+  "env": {
+    "TELEGRAM_TOKEN": "@telegram_token",
+    "TELEGRAM_CHAT_ID": "@telegram_chat_id",
+    "RESEND_API_KEY": "@resend_api_key",
+    "SENDER_EMAIL": "@sender_email",
+    "SUPABASE_URL": "@supabase_url",
+    "SUPABASE_ANON_KEY": "@supabase_anon_key",
+    "BROWSERLESS_TOKEN": "@browserless_token",
+    "API_KEY": "@api_key"
+  }
+}
